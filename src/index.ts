@@ -118,7 +118,7 @@ export async function run(): Promise<void> {
       title: `${pullRequest.title} (${targetBranch})`,
       head: cherryPickBranch,
       base: targetBranch,
-      body: `Cherry-picked from PR #${prNumber}\n\n${pullRequest.html_url}`,
+      body: `${pullRequest.body}\n\nCherry-picked from PR #${prNumber}`
     });
 
     core.info(`Created PR: ${newPr.html_url}`);

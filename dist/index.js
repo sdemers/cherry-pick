@@ -30061,7 +30061,7 @@ function run() {
                 title: `${pullRequest.title} (${targetBranch})`,
                 head: cherryPickBranch,
                 base: targetBranch,
-                body: `Cherry-picked from PR #${prNumber}\n\n${pullRequest.html_url}`,
+                body: `${pullRequest.body}\n\nCherry-picked from PR #${prNumber}`
             });
             core.info(`Created PR: ${newPr.html_url}`);
             core.setOutput('cherry_pick_pr_url', newPr.html_url);
