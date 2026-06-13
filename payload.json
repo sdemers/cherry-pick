@@ -1,6 +1,0 @@
-{
-  "inputs": {
-    "pr_number": "42",
-    "target_branch": "release/v2"
-  }
-}
