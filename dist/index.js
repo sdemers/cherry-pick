@@ -29965,32 +29965,23 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const exec = __importStar(__nccwpck_require__(5236));
 const fs = __importStar(__nccwpck_require__(9896));
-function getManualInstructions(prNumber, targetBranch, cherryPickBranch, commits) {
-    const commitsList = commits.map(commit => `git cherry-pick ${commit.sha}  # ${commit.commit.message.split('\n')[0]}`).join('\n');
-    return `
-Manual cherry-pick commands:
-
-# Setup
-git fetch origin
-git checkout ${targetBranch}
-git pull origin ${targetBranch}
-git checkout -b ${cherryPickBranch}
-
-# Cherry-pick commits one by one:
-${commitsList}
-
-# If conflicts:
-git add .
-git cherry-pick --continue
-# or
-git cherry-pick --abort
-
-# After all commits are cherry-picked:
-git push origin ${cherryPickBranch}
-
-# Create PR: ${cherryPickBranch} → ${targetBranch}
-`;
+function git(args, options) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        let stdout = '';
+        let stderr = '';
+        const exitCode = yield exec.exec('git', args, {
+            silent: (_a = options === null || options === void 0 ? void 0 : options.silent) !== null && _a !== void 0 ? _a : true,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => { stdout += data.toString(); },
+                stderr: (data) => { stderr += data.toString(); },
+            },
+        });
+        return { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
+    });
 }
 function addToSummary(message) {
     const summaryFile = process.env.GITHUB_STEP_SUMMARY;
@@ -30001,125 +29992,86 @@ function addToSummary(message) {
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            // Get inputs
             const prNumber = parseInt(core.getInput('pr_number', { required: true }));
             const targetBranch = core.getInput('target_branch', { required: true });
             const token = core.getInput('github_token', { required: true });
-            // Create octokit client
             const octokit = github.getOctokit(token);
-            const context = github.context;
-            const { owner, repo } = context.repo;
-            // Get PR details
-            const { data: pullRequest } = yield octokit.rest.pulls.get({
-                owner,
-                repo,
-                pull_number: prNumber
-            });
-            // Get all commits from PR
-            const { data: commits } = yield octokit.rest.pulls.listCommits({
-                owner,
-                repo,
-                pull_number: prNumber
-            });
-            core.info(`Found ${commits.length} commits in PR #${prNumber}`);
-            addToSummary(`## Cherry Pick Operation\n`);
-            addToSummary(`Found ${commits.length} commits in PR #${prNumber}\n`);
-            // Create a new branch from the target branch
+            const { owner, repo } = github.context.repo;
+            const { data: pullRequest } = yield octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const commits = yield octokit.paginate(octokit.rest.pulls.listCommits, { owner, repo, pull_number: prNumber });
+            if (commits.length === 0) {
+                throw new Error(`PR #${prNumber} has no commits`);
+            }
             const cherryPickBranch = `cherry-pick-${prNumber}-to-${targetBranch}`;
-            // Get the SHA of the target branch
-            const { data: targetRef } = yield octokit.rest.git.getRef({
-                owner,
-                repo,
-                ref: `heads/${targetBranch}`
-            });
-            // Create new branch
-            yield octokit.rest.git.createRef({
-                owner,
-                repo,
-                ref: `refs/heads/${cherryPickBranch}`,
-                sha: targetRef.object.sha
-            });
-            let hasConflicts = false;
-            // Cherry-pick each commit
+            core.info(`Cherry-picking PR #${prNumber} (${commits.length} commits) to ${targetBranch}`);
+            addToSummary(`## Cherry Pick: PR #${prNumber} → \`${targetBranch}\`\n`);
+            addToSummary(`Found ${commits.length} commits\n`);
+            yield git(['config', 'user.name', 'github-actions[bot]']);
+            yield git(['config', 'user.email', 'github-actions[bot]@users.noreply.github.com']);
+            yield git(['fetch', '--no-tags', 'origin', targetBranch]);
+            yield git(['fetch', '--no-tags', 'origin', `pull/${prNumber}/head`]);
+            const { exitCode: checkoutCode, stderr: checkoutErr } = yield git(['checkout', '-b', cherryPickBranch, `origin/${targetBranch}`]);
+            if (checkoutCode !== 0) {
+                throw new Error(`Failed to create branch from ${targetBranch}: ${checkoutErr}`);
+            }
+            let cherryPickedCount = 0;
             for (const commit of commits) {
-                try {
-                    // Get the current branch ref
-                    const { data: branchRef } = yield octokit.rest.git.getRef({
-                        owner,
-                        repo,
-                        ref: `heads/${cherryPickBranch}`
-                    });
-                    // Create a new commit using the same tree but with a single parent
-                    const { data: newCommit } = yield octokit.rest.git.createCommit({
-                        owner,
-                        repo,
-                        message: commit.commit.message,
-                        tree: commit.commit.tree.sha,
-                        parents: [branchRef.object.sha]
-                    });
-                    // Update the branch reference
-                    yield octokit.rest.git.updateRef({
-                        owner,
-                        repo,
-                        ref: `heads/${cherryPickBranch}`,
-                        sha: newCommit.sha
-                    });
-                    core.info(`Successfully cherry-picked commit ${commit.sha}`);
-                    addToSummary(`✅ Successfully cherry-picked commit ${commit.sha}\n`);
+                const sha = commit.sha;
+                const msg = commit.commit.message.split('\n')[0];
+                core.info(`Cherry-picking ${sha.substring(0, 7)}: ${msg}`);
+                const args = ['cherry-pick', '--no-commit'];
+                if (commit.parents.length > 1) {
+                    args.push('-m', '1');
                 }
-                catch (error) {
-                    hasConflicts = true;
-                    core.error(`Failed to cherry-pick commit ${commit.sha}`);
-                    core.error('Conflicts detected during cherry-pick');
-                    addToSummary(`❌ Failed to cherry-pick commit ${commit.sha}\n`);
-                    addToSummary(`⚠️ Conflicts detected during cherry-pick\n`);
-                    // Output manual instructions
-                    const manualInstructions = getManualInstructions(prNumber, targetBranch, cherryPickBranch, commits);
-                    core.info('\n=== Manual Cherry-Pick Instructions ===\n');
-                    core.info(manualInstructions);
-                    addToSummary(`\n### Manual Cherry-Pick Instructions\n\`\`\`bash\n${manualInstructions}\n\`\`\`\n`);
-                    // Delete the branch since we couldn't complete the automated process
-                    try {
-                        yield octokit.rest.git.deleteRef({
-                            owner,
-                            repo,
-                            ref: `heads/${cherryPickBranch}`
-                        });
+                args.push(sha);
+                const result = yield git(args);
+                if (result.exitCode !== 0) {
+                    const { stdout: conflictFiles } = yield git(['diff', '--name-only', '--diff-filter=U']);
+                    const conflicted = conflictFiles
+                        ? conflictFiles.split('\n').map(f => `  - ${f}`).join('\n')
+                        : '  (unknown)';
+                    core.error(`Failed to cherry-pick ${sha.substring(0, 7)}`);
+                    core.error(`Conflicted files:\n${conflicted}`);
+                    core.info(result.stderr);
+                    addToSummary(`❌ Conflict on commit \`${sha.substring(0, 7)}\` (${msg})\n`);
+                    addToSummary(`Conflicted files:\n\`\`\`\n${conflicted}\n\`\`\`\n`);
+                    if (cherryPickedCount > 0) {
+                        yield git(['cherry-pick', '--abort']);
+                        yield git(['push', 'origin', cherryPickBranch]);
+                        addToSummary(`\nℹ️ Branch \`${cherryPickBranch}\` pushed with ${cherryPickedCount}/${commits.length} commits applied\n`);
                     }
-                    catch (deleteError) {
-                        core.warning('Failed to delete incomplete branch');
-                        addToSummary(`⚠️ Failed to delete incomplete branch\n`);
-                    }
-                    throw error;
+                    throw new Error(`Conflict cherry-picking ${sha.substring(0, 7)}: ${msg}\n\n` +
+                        `Conflicted files:\n${conflicted}\n\n` +
+                        `Resolve locally:\n` +
+                        `  git fetch origin ${cherryPickBranch}\n` +
+                        `  git checkout ${cherryPickBranch}\n` +
+                        `  git cherry-pick ${sha}  # resolve conflicts, then git add . && git cherry-pick --continue\n` +
+                        `  git push origin ${cherryPickBranch}`);
                 }
+                yield git(['add', '-A']);
+                yield git(['commit', '--allow-empty', '-m', commit.commit.message]);
+                cherryPickedCount++;
+                core.info(`✅ Cherry-picked ${sha.substring(0, 7)}`);
+                addToSummary(`✅ Cherry-picked \`${sha.substring(0, 7)}\` (${msg})\n`);
             }
-            if (!hasConflicts) {
-                // Create PR for the cherry-picked changes
-                const { data: newPr } = yield octokit.rest.pulls.create({
-                    owner,
-                    repo,
-                    title: `${pullRequest.title} (${targetBranch})`,
-                    head: cherryPickBranch,
-                    base: targetBranch,
-                    body: `${pullRequest.body}\n\nCherry-picked from PR #${prNumber}`
-                });
-                const successMessage = `Created new PR: ${newPr.html_url}`;
-                core.info(successMessage);
-                core.setOutput('cherry_pick_pr_url', newPr.html_url);
-                core.setOutput('cherry_pick_pr_number', newPr.number);
-                addToSummary(`\n### Success! 🎉\n`);
-                addToSummary(`New PR created: [#${newPr.number}](${newPr.html_url})\n`);
-                addToSummary(`\nOriginal PR: [#${prNumber}](${pullRequest.html_url})\n`);
-            }
+            yield git(['push', 'origin', cherryPickBranch]);
+            const { data: newPr } = yield octokit.rest.pulls.create({
+                owner,
+                repo,
+                title: `${pullRequest.title} (${targetBranch})`,
+                head: cherryPickBranch,
+                base: targetBranch,
+                body: `Cherry-picked from PR #${prNumber}\n\n${pullRequest.html_url}`,
+            });
+            core.info(`Created PR: ${newPr.html_url}`);
+            core.setOutput('cherry_pick_pr_url', newPr.html_url);
+            core.setOutput('cherry_pick_pr_number', newPr.number);
+            addToSummary(`\n### Success 🎉\nNew PR: [#${newPr.number}](${newPr.html_url})\n`);
         }
         catch (error) {
             if (error instanceof Error) {
                 core.setFailed(error.message);
                 addToSummary(`\n### Failed ❌\n${error.message}\n`);
-            }
-            else {
-                core.setFailed('An unexpected error occurred');
-                addToSummary(`\n### Failed ❌\nAn unexpected error occurred\n`);
             }
         }
     });

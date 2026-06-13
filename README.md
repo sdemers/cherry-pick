@@ -26,7 +26,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: sdemers/cherry-pick@v1.1.0
+      - uses: sdemers/cherry-pick@v2
         with:
           pr_number: ${{ github.event.inputs.pr_number }}
           target_branch: ${{ github.event.inputs.target_branch }}
