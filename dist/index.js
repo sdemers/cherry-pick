@@ -30098,10 +30098,10 @@ function run() {
                 const { data: newPr } = yield octokit.rest.pulls.create({
                     owner,
                     repo,
-                    title: `Cherry-pick PR #${prNumber} to ${targetBranch}`,
+                    title: `${pullRequest.title} (${targetBranch})`,
                     head: cherryPickBranch,
                     base: targetBranch,
-                    body: `Cherry-picking changes from PR #${prNumber}\n\nOriginal PR: ${pullRequest.html_url}`
+                    body: `${pullRequest.body}\n\nCherry-picked from PR #${prNumber}`
                 });
                 const successMessage = `Created new PR: ${newPr.html_url}`;
                 core.info(successMessage);
