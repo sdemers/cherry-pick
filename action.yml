@@ -1,6 +1,6 @@
 name: 'PR Cherry Pick Action'
 description: 'Cherry-pick a PR or its commits to a target branch'
-author: 'artyrian'
+author: 'sdemers'
 
 inputs:
   pr_number:
@@ -15,7 +15,7 @@ inputs:
     default: ${{ github.token }}
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
 
 branding:

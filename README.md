@@ -26,7 +26,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: artyrian/cherry-pick@v1
+      - uses: sdemers/cherry-pick@v1.1.0
         with:
           pr_number: ${{ github.event.inputs.pr_number }}
           target_branch: ${{ github.event.inputs.target_branch }}
@@ -81,7 +81,7 @@ When conflicts occur, the action provides:
 ## 📦 Development
 
 Requirements:
-- Node.js 20+
+- Node.js 24+
 
 ```bash
 # Setup
