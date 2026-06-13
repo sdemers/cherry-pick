@@ -81,7 +81,7 @@ When conflicts occur, the action provides:
 ## 📦 Development
 
 Requirements:
-- Node.js 22+
+- Node.js 24+
 
 ```bash
 # Setup
