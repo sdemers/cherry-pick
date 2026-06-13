@@ -50,7 +50,7 @@ jobs:
 | Input | Description | Required |
 |-------|-------------|----------|
 | `pr_number` | PR to cherry-pick from | Yes |
-| `target_branch` | Branch to cherry-pick to | Yes |
+| `target_branch` | Target branch(s) to cherry-pick to. Use spaces or commas for multiple. | Yes |
 | `github_token` | GitHub token | No (default: `github.token`) |
 
 ### Outputs

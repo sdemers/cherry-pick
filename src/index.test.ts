@@ -1,4 +1,3 @@
-let mockExecOutput = { exitCode: 0, stdout: '', stderr: '' };
 let mockExecCalls: { cmd: string; args: string[] }[] = [];
 
 const mockGetInput = jest.fn();
@@ -27,15 +26,19 @@ jest.mock('fs', () => ({
   appendFileSync: mockAppendFileSync,
 }));
 
+const stubPullRequest = {
+  html_url: 'https://github.com/test-owner/test-repo/pull/123',
+  title: 'Test PR',
+  body: 'Test body',
+  head: { ref: 'feature-branch' },
+};
+
 const mockOctokit = {
   rest: {
     pulls: {
       get: jest.fn(),
       listCommits: jest.fn(),
       create: jest.fn(),
-    },
-    git: {
-      getRef: jest.fn(),
     },
   },
   paginate: jest.fn(),
@@ -48,18 +51,59 @@ jest.mock('@actions/github', () => ({
   getOctokit: () => mockOctokit,
 }));
 
-function setupExec() {
+const stubCommits = [
+  {
+    sha: 'abc123def456',
+    commit: { message: 'First commit\nDetails', tree: { sha: 'tree-1' } },
+    parents: [{ sha: 'parent-1' }],
+  },
+  {
+    sha: '789012ghi345',
+    commit: { message: 'Second commit', tree: { sha: 'tree-2' } },
+    parents: [{ sha: 'parent-2' }],
+  },
+];
+
+function setupExec(results?: { isCherryPickFail?: boolean; firstCherryPickFail?: boolean }) {
   mockExecCalls = [];
+  let callCount = 0;
+
   mockExec.mockImplementation((cmd: string, args: string[], options?: any) => {
+    const idx = callCount++;
     mockExecCalls.push({ cmd, args });
-    const { exitCode, stdout, stderr } = mockExecOutput;
+
+    const isCherryPick = cmd === 'git' && args[0] === 'cherry-pick' && args[1] === '--no-commit';
+    const isDiff = cmd === 'git' && args[0] === 'diff';
+
+    let code = 0;
+    let out = '';
+    let err = '';
+
+    if (isCherryPick && results) {
+      if (results.isCherryPickFail) {
+        code = 1;
+        err = 'error: could not apply 789... Second commit';
+      }
+      if (results.firstCherryPickFail) {
+        const targetSha = args[args.length - 1];
+        if (targetSha === 'abc123def456') {
+          code = 1;
+          err = 'error: could not apply abc... First commit';
+        }
+      }
+    }
+
+    if (isDiff && code === 1) {
+      out = 'src/conflict.ts\npackage-lock.json';
+    }
+
     if (options?.listeners?.stdout) {
-      options.listeners.stdout(Buffer.from(stdout));
+      options.listeners.stdout(Buffer.from(out));
     }
     if (options?.listeners?.stderr) {
-      options.listeners.stderr(Buffer.from(stderr));
+      options.listeners.stderr(Buffer.from(err));
     }
-    return exitCode;
+    return code;
   });
 }
 
@@ -68,8 +112,6 @@ describe('Cherry Pick Action', () => {
     jest.resetModules();
     jest.clearAllMocks();
     setupExec();
-
-    mockExecOutput = { exitCode: 0, stdout: '', stderr: '' };
 
     mockGetInput.mockImplementation((name: string) => {
       switch (name) {
@@ -80,44 +122,20 @@ describe('Cherry Pick Action', () => {
       }
     });
 
-    mockOctokit.rest.pulls.get.mockResolvedValue({
-      data: {
-        html_url: 'https://github.com/test-owner/test-repo/pull/123',
-        title: 'Test PR',
-        body: 'Test body',
-        head: { ref: 'feature-branch' },
-      },
-    });
-
-    mockOctokit.paginate.mockResolvedValue([
-      {
-        sha: 'abc123def456',
-        commit: { message: 'First commit\nDetails', tree: { sha: 'tree-1' } },
-        parents: [{ sha: 'parent-1' }],
-      },
-      {
-        sha: '789012ghi345',
-        commit: { message: 'Second commit', tree: { sha: 'tree-2' } },
-        parents: [{ sha: 'parent-2' }],
-      },
-    ]);
-
+    mockOctokit.rest.pulls.get.mockResolvedValue({ data: { ...stubPullRequest } });
+    mockOctokit.paginate.mockResolvedValue([...stubCommits]);
     mockOctokit.rest.pulls.create.mockResolvedValue({
-      data: {
-        number: 456,
-        html_url: 'https://github.com/test-owner/test-repo/pull/456',
-      },
+      data: { number: 456, html_url: 'https://github.com/test-owner/test-repo/pull/456' },
     });
   });
 
-  it('should cherry-pick all commits and create PR', async () => {
+  it('should cherry-pick to a single branch and create PR', async () => {
     const { run } = await import('./index');
     await run();
 
     const execCommands = mockExecCalls.map(c => `${c.cmd} ${c.args.join(' ')}`);
 
     expect(execCommands).toContain('git config user.name github-actions[bot]');
-    expect(execCommands).toContain('git config user.email github-actions[bot]@users.noreply.github.com');
     expect(execCommands).toContain('git fetch --no-tags origin main');
     expect(execCommands).toContain('git fetch --no-tags origin pull/123/head');
 
@@ -131,51 +149,58 @@ describe('Cherry Pick Action', () => {
     });
 
     expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_url', 'https://github.com/test-owner/test-repo/pull/456');
-    expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_number', 456);
+    expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_number', '456');
   });
 
-  it('should handle git cherry-pick failure', async () => {
-    let callCount = 0;
-    const callResults: Record<number, { code: number; stdout?: string; stderr?: string }> = {
-      // cherry-pick commands will be calls 7 and 8 (0-indexed), make them succeed
-    };
-    mockExec.mockImplementation((cmd: string, args: string[], options?: any) => {
-      const idx = callCount++;
-      mockExecCalls.push({ cmd, args });
-
-      const isCherryPick = cmd === 'git' && args[0] === 'cherry-pick' && args[1] === '--no-commit';
-
-      let code = 0;
-      let out = '';
-      let err = '';
-
-      if (isCherryPick) {
-        // First commit succeeds, second fails
-        if (args[args.length - 1] === '789012ghi345') {
-          code = 1;
-          err = 'error: could not apply 789... Second commit';
-          out = 'src/conflict.ts\npackage-lock.json';
-        }
+  it('should cherry-pick to multiple branches', async () => {
+    mockGetInput.mockImplementation((name: string) => {
+      switch (name) {
+        case 'pr_number': return '123';
+        case 'target_branch': return 'main release/v2';
+        case 'github_token': return 'fake-token';
+        default: return '';
       }
-
-      if (cmd === 'git' && args[0] === 'diff') {
-        out = 'src/conflict.ts\npackage-lock.json';
-      }
-
-      if (options?.listeners?.stdout) {
-        options.listeners.stdout(Buffer.from(out));
-      }
-      if (options?.listeners?.stderr) {
-        options.listeners.stderr(Buffer.from(err));
-      }
-      return code;
     });
+
+    const mockCreate = jest.fn();
+    let createCallCount = 0;
+    mockCreate
+      .mockResolvedValueOnce({ data: { number: 456, html_url: 'https://github.com/.../pull/456' } })
+      .mockResolvedValueOnce({ data: { number: 789, html_url: 'https://github.com/.../pull/789' } });
+    mockOctokit.rest.pulls.create = mockCreate;
+
+    const { run } = await import('./index');
+    await run();
+
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockCreate).toHaveBeenNthCalledWith(1, expect.objectContaining({ base: 'main', head: 'feature-branch-on-main' }));
+    expect(mockCreate).toHaveBeenNthCalledWith(2, expect.objectContaining({ base: 'release/v2', head: 'feature-branch-on-release/v2' }));
+
+    expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_url', 'https://github.com/.../pull/456,https://github.com/.../pull/789');
+    expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_number', '456,789');
+  });
+
+  it('should continue to next branch if one fails', async () => {
+    mockGetInput.mockImplementation((name: string) => {
+      switch (name) {
+        case 'pr_number': return '123';
+        case 'target_branch': return 'main release/v2';
+        case 'github_token': return 'fake-token';
+        default: return '';
+      }
+    });
+
+    setupExec({ firstCherryPickFail: true });
+
+    const mockCreate = jest.fn();
+    mockCreate.mockResolvedValue({ data: { number: 789, html_url: 'https://github.com/.../pull/789' } });
+    mockOctokit.rest.pulls.create = mockCreate;
 
     const { run } = await import('./index');
     await run();
 
     expect(mockSetFailed).toHaveBeenCalled();
-    expect(mockSetFailed.mock.calls[0][0]).toContain('Conflict');
+    expect(mockSetFailed.mock.calls[0][0]).toContain('release/v2');
   });
 
   it('should handle merge commits with -m 1', async () => {

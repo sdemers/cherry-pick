@@ -7,7 +7,7 @@ inputs:
     description: 'Pull Request number to cherry-pick from'
     required: true
   target_branch:
-    description: 'Target branch to cherry-pick to'
+    description: 'Target branch(s) to cherry-pick to. Multiple branches can be space or comma separated.'
     required: true
   github_token:
     description: 'GitHub token for authentication'
