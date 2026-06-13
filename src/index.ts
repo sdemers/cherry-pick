@@ -150,10 +150,10 @@ export async function run(): Promise<void> {
       const { data: newPr } = await octokit.rest.pulls.create({
         owner,
         repo,
-        title: `${pullRequest.title} ( ${targetBranch})`,
+        title: `${pullRequest.title} (${targetBranch})`,
         head: cherryPickBranch,
         base: targetBranch,
-        body: pullRequest.body + `\n\nCherry-picked from PR #${prNumber}`
+        body: `${pullRequest.body}\n\nCherry-picked from PR #${prNumber}`
       });
 
       const successMessage = `Created new PR: ${newPr.html_url}`;
