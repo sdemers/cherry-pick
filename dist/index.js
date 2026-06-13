@@ -29998,11 +29998,12 @@ function run() {
             const octokit = github.getOctokit(token);
             const { owner, repo } = github.context.repo;
             const { data: pullRequest } = yield octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const sourceBranch = pullRequest.head.ref;
             const commits = yield octokit.paginate(octokit.rest.pulls.listCommits, { owner, repo, pull_number: prNumber });
             if (commits.length === 0) {
                 throw new Error(`PR #${prNumber} has no commits`);
             }
-            const cherryPickBranch = `cherry-pick-${prNumber}-to-${targetBranch}`;
+            const cherryPickBranch = `${sourceBranch}-on-${targetBranch}`;
             core.info(`Cherry-picking PR #${prNumber} (${commits.length} commits) to ${targetBranch}`);
             addToSummary(`## Cherry Pick: PR #${prNumber} → \`${targetBranch}\`\n`);
             addToSummary(`Found ${commits.length} commits\n`);

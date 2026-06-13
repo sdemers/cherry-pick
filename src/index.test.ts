@@ -85,6 +85,7 @@ describe('Cherry Pick Action', () => {
         html_url: 'https://github.com/test-owner/test-repo/pull/123',
         title: 'Test PR',
         body: 'Test body',
+        head: { ref: 'feature-branch' },
       },
     });
 
@@ -124,9 +125,9 @@ describe('Cherry Pick Action', () => {
       owner: 'test-owner',
       repo: 'test-repo',
       title: 'Test PR (main)',
-      head: 'cherry-pick-123-to-main',
+      head: 'feature-branch-on-main',
       base: 'main',
-      body: 'Cherry-picked from PR #123\n\nhttps://github.com/test-owner/test-repo/pull/123',
+      body: 'Test body\n\nCherry-picked from PR #123',
     });
 
     expect(mockSetOutput).toHaveBeenCalledWith('cherry_pick_pr_url', 'https://github.com/test-owner/test-repo/pull/456');
